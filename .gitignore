@@ -1,0 +1,3 @@
+node_modules/
+data/game-state.json*
+.spotify-credentials.json

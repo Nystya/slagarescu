@@ -1,0 +1,14 @@
+{
+  "name": "hitster-night",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multiplayer Hitster-style music timeline game for a room full of phones",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "songs": "node tools/fetch-playlist.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
