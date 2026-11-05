@@ -3,7 +3,7 @@
 A multiplayer web version of the Hitster music card game. A laptop runs the
 game and plays the music; everyone plays from their own phone on the same Wi-Fi.
 
-No dependencies (just Node 18+), no Spotify login — songs play as 30-second
+No dependencies (just Node 24+), no Spotify login — songs play as 30-second
 Spotify previews.
 
 ## Play

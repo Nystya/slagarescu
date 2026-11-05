@@ -9,6 +9,6 @@
     "songs": "node tools/fetch-playlist.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   }
 }
