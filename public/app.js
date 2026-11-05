@@ -295,6 +295,7 @@ function playerHTML() {
         <div class="banner"><h2>You're in, ${esc(me.name)}!</h2>
         <p class="muted">Waiting for the host to start the game…</p></div>
         <div class="panel"><h3>First to ${view.target} cards wins</h3>
+        <p>Playlists: ${view.playlists.filter((pl) => pl.enabled).map((pl) => esc(pl.name)).join(', ') || '—'} (${view.songCount} songs)</p>
         <p class="muted">You start with ${view.rules.startTokens} ${coin} tokens. Name the title &amp; artist to earn more.
         Spend ${view.rules.skipCost} to skip a song, ${view.rules.stealCost} to steal, ${view.rules.buyCost} to buy a free card.</p></div>`;
 
@@ -424,12 +425,25 @@ function hostLobbyHTML() {
       }
     </div>
     <div class="panel">
+      <h3>Playlists</h3>
+      <div class="playlists">${view.playlists
+        .map(
+          (pl) => `<label class="playlist ${pl.enabled ? 'on' : ''}">
+            <input type="checkbox" data-playlist="${esc(pl.id)}" ${pl.enabled ? 'checked' : ''}>
+            <span class="pl-name">${esc(pl.name)}</span>
+            <span class="muted">${pl.count} songs</span>
+          </label>`,
+        )
+        .join('')}</div>
+      ${view.songCount ? '' : '<p class="muted" style="margin-top:12px">Pick at least one playlist.</p>'}
+    </div>
+    <div class="panel">
       <h3>Cards to win</h3>
       <div class="choice">${view.rules.targets
         .map((n) => `<button class="${view.target === n ? 'on' : ''}" data-action="setTarget" data-target="${n}">${n}</button>`)
         .join('')}</div>
     </div>
-    <div class="center"><button class="primary" data-action="start" ${view.players.length ? '' : 'disabled'}>Start game</button></div>`;
+    <div class="center"><button class="primary" data-action="start" ${view.players.length && view.songCount ? '' : 'disabled'}>Start game</button></div>`;
 }
 
 function hostRecordHTML() {
@@ -605,6 +619,12 @@ document.addEventListener('click', (e) => {
 
 app.addEventListener('input', (e) => {
   if (e.target.id === 'join-name') ui.joinName = e.target.value;
+});
+
+app.addEventListener('change', (e) => {
+  if (!e.target.dataset.playlist) return;
+  const playlists = [...app.querySelectorAll('[data-playlist]:checked')].map((el) => el.dataset.playlist);
+  act('setPlaylists', { playlists });
 });
 
 app.addEventListener('submit', async (e) => {

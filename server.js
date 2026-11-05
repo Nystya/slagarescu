@@ -20,7 +20,15 @@ const PUBLIC = join(ROOT, 'public');
 const SAVE_FILE = join(ROOT, 'data', 'game-state.json');
 const PORT = Number(process.env.PORT) || 3000;
 
-const songs = JSON.parse(readFileSync(join(ROOT, 'data', 'songs.json'), 'utf8'));
+// Playlists from data/playlists.json whose songs have been fetched (tools/fetch-playlist.mjs).
+const playlists = JSON.parse(readFileSync(join(ROOT, 'data', 'playlists.json'), 'utf8')).flatMap((pl) => {
+  const file = join(ROOT, 'data', 'songs', `${pl.id}.json`);
+  if (!existsSync(file)) {
+    console.warn(`Skipping playlist "${pl.name}": no ${file} — run node tools/fetch-playlist.mjs ${pl.id}`);
+    return [];
+  }
+  return [{ id: pl.id, name: pl.name, songs: JSON.parse(readFileSync(file, 'utf8')) }];
+});
 let saved = null;
 if (existsSync(SAVE_FILE)) {
   try {
@@ -29,7 +37,8 @@ if (existsSync(SAVE_FILE)) {
     console.warn('Ignoring unreadable saved game');
   }
 }
-const game = new Game(songs, saved);
+const game = new Game(playlists, saved);
+if (saved && game.state !== saved) console.warn('Saved game does not match the current songs — starting fresh');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -146,7 +155,8 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   const lan = lanAddresses();
-  console.log(`\n  Hitster Night is running with ${songs.length} songs.\n`);
+  const list = playlists.map((pl) => `${pl.name} (${pl.songs.length})`).join(', ');
+  console.log(`\n  Hitster Night is running with ${game.songs.size} songs: ${list}\n`);
   console.log(`  Host screen (this computer):  http://localhost:${PORT}/host`);
   if (lan.length) console.log(`  Players join on their phones: ${lan.join('  or  ')}`);
   else console.log('  No Wi-Fi address found — are you connected to a network?');

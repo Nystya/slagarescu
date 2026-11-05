@@ -1,0 +1,5 @@
+[
+  { "id": "hitster", "name": "Hitster", "tracks": "hitster-tracks.txt" },
+  { "id": "manele", "name": "Manele", "tracks": "manele-tracks.txt" },
+  { "id": "romanesti", "name": "Românești", "tracks": "romanesti-tracks.txt" }
+]

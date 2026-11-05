@@ -1,32 +1,23 @@
 #!/usr/bin/env node
-// Builds data/songs.json from a public Spotify playlist.
+// Builds data/songs/<id>.json for the playlists listed in data/playlists.json.
 //
-//   node tools/fetch-playlist.mjs [playlist-url-or-id]
-//   node tools/fetch-playlist.mjs --tracks data/tracks.txt
+//   node tools/fetch-playlist.mjs            # every playlist
+//   node tools/fetch-playlist.mjs manele     # just these playlist ids
 //
-// --tracks reads a file of track links, e.g. pasted after selecting every song
-// in a playlist in the Spotify desktop app (Cmd/Ctrl+A, then Cmd/Ctrl+C).
+// Each playlist entry names a file of track links in data/, e.g. pasted after
+// selecting every song of a playlist in the Spotify desktop app
+// (Cmd/Ctrl+A, then Cmd/Ctrl+C). Spotify's public embed only lists the first
+// 100 tracks of a playlist and its Web API needs a Premium developer account,
+// so the link list is the reliable way to get them all.
 //
-// Otherwise, without credentials it uses Spotify's public embed pages, which only list the
-// first 100 tracks. With a (free) Spotify developer app it lists the whole
-// playlist through the Web API. Provide its credentials either as
-// SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET env vars or in
-// .spotify-credentials.json: { "clientId": "...", "clientSecret": "..." }.
-//
-// Each track's release date and 30-second preview URL come from its embed page.
-// Spotify dates are often those of a remaster/compilation, so
+// Each track's release date and 30-second preview URL come from its public
+// embed page. Spotify dates are often those of a remaster/compilation, so
 // data/year-overrides.json (keyed by cleaned title) corrects them.
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-const DEFAULT_PLAYLIST = '7gzx60HLzeaDcopqwvdW7G';
 const root = new URL('..', import.meta.url);
-
-const tracksFlag = process.argv.indexOf('--tracks');
-const tracksFile = tracksFlag !== -1 ? process.argv[tracksFlag + 1] : null;
-const arg = (tracksFlag === -1 && process.argv[2]) || DEFAULT_PLAYLIST;
-const playlistId = arg.match(/playlist[/:]([A-Za-z0-9]{22})/)?.[1] || arg;
+const dataFile = (name) => new URL(`data/${name}`, root);
 
 async function embedEntity(kind, id) {
   let html;
@@ -67,91 +58,59 @@ function cleanArtist(artists) {
   return names.join(', ');
 }
 
-async function credentials() {
-  const { SPOTIFY_CLIENT_ID: clientId, SPOTIFY_CLIENT_SECRET: clientSecret } = process.env;
-  if (clientId && clientSecret) return { clientId, clientSecret };
-  const file = new URL('.spotify-credentials.json', root);
-  if (existsSync(file)) return JSON.parse(await readFile(file, 'utf8'));
-  return null;
-}
-
-// All track ids in the playlist, via the Web API (client-credentials flow).
-async function apiTrackIds({ clientId, clientSecret }) {
-  const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-  });
-  if (!tokenRes.ok) throw new Error(`Spotify login failed: HTTP ${tokenRes.status} ${await tokenRes.text()}`);
-  const { access_token: token } = await tokenRes.json();
-
-  const ids = [];
-  let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100&fields=next,items(track(id,type,is_local))`;
-  while (url) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(`Playlist request failed: HTTP ${res.status} ${await res.text()}`);
-    const page = await res.json();
-    for (const { track } of page.items) {
-      if (track?.id && track.type === 'track' && !track.is_local) ids.push(track.id);
-    }
-    url = page.next;
-  }
-  return ids;
-}
-
-const overrides = JSON.parse(await readFile(new URL('data/year-overrides.json', root), 'utf8'));
-const creds = await credentials();
-let trackIds;
-if (tracksFile) {
-  const text = await readFile(tracksFile, 'utf8');
-  trackIds = [...text.matchAll(/track[/:]([A-Za-z0-9]{22})/g)].map((m) => m[1]);
-  console.error(`${tracksFile}: ${new Set(trackIds).size} unique tracks`);
-} else if (creds) {
-  trackIds = await apiTrackIds(creds);
-  console.error(`Playlist ${playlistId}: ${trackIds.length} tracks via the Web API`);
-} else {
-  const playlist = await embedEntity('playlist', playlistId);
-  trackIds = playlist.trackList.map((t) => t.uri.split(':').pop());
-  console.error(`Playlist "${playlist.name}": ${trackIds.length} tracks via embed (add Spotify credentials for more)`);
-}
-
 // Playlists often hold the same song twice (album + single, remaster, soundtrack).
 const songKey = (title, artists) =>
-  `${title.toLowerCase().replace(/[^a-z0-9]/g, '')}|${artists.map((a) => a.name.toLowerCase()).sort().join(',')}`;
-const exclude = new Set(overrides._exclude || []);
-const seen = new Set();
+  `${title.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')}|${artists.map((a) => a.name.toLowerCase()).sort().join(',')}`;
 
-const songs = [];
-for (const id of new Set(trackIds)) {
-  if (exclude.has(id)) {
-    console.error(`  skip ${id}: excluded in year-overrides.json`);
-    continue;
-  }
-  try {
-    const t = await embedEntity('track', id);
-    const title = cleanTitle(t.name);
-    const spotifyYear = Number(t.releaseDate?.isoString?.slice(0, 4));
-    const year = overrides[title] ?? spotifyYear;
-    const key = songKey(title, t.artists);
-    if (seen.has(key)) {
-      console.error(`  skip ${title}: duplicate`);
+async function buildPlaylist(playlist, overrides) {
+  const text = await readFile(dataFile(playlist.tracks), 'utf8');
+  const trackIds = new Set([...text.matchAll(/track[/:]([A-Za-z0-9]{22})/g)].map((m) => m[1]));
+  console.error(`${playlist.name}: ${trackIds.size} unique tracks in data/${playlist.tracks}`);
+
+  const exclude = new Set(overrides._exclude || []);
+  const seen = new Set();
+  const songs = [];
+  for (const id of trackIds) {
+    if (exclude.has(id)) {
+      console.error(`  skip ${id}: excluded in year-overrides.json`);
       continue;
     }
-    seen.add(key);
-    if (!year || !t.audioPreview?.url) {
-      console.error(`  skip ${title}: ${!year ? 'no year' : 'no preview'}`);
-      continue;
+    try {
+      const t = await embedEntity('track', id);
+      const title = cleanTitle(t.name);
+      const spotifyYear = Number(t.releaseDate?.isoString?.slice(0, 4));
+      const year = overrides[title] ?? spotifyYear;
+      const key = songKey(title, t.artists);
+      if (seen.has(key)) {
+        console.error(`  skip ${title}: duplicate`);
+        continue;
+      }
+      seen.add(key);
+      if (!year || !t.audioPreview?.url) {
+        console.error(`  skip ${title}: ${!year ? 'no year' : 'no preview'}`);
+        continue;
+      }
+      songs.push({ id, title, artist: cleanArtist(t.artists), year, preview: t.audioPreview.url });
+      console.error(`  ${year}${overrides[title] ? '*' : ' '} ${songs.at(-1).artist} – ${title}`);
+    } catch (err) {
+      console.error(`  skip ${id}: ${err.message}`);
     }
-    songs.push({ id, title, artist: cleanArtist(t.artists), year, preview: t.audioPreview.url });
-    console.error(`  ${year}${overrides[title] ? '*' : ' '} ${songs.at(-1).artist} – ${title}`);
-  } catch (err) {
-    console.error(`  skip ${id}: ${err.message}`);
+    await new Promise((r) => setTimeout(r, 150));
   }
-  await new Promise((r) => setTimeout(r, 150));
+
+  await mkdir(dataFile('songs'), { recursive: true });
+  await writeFile(dataFile(`songs/${playlist.id}.json`), JSON.stringify(songs, null, 1) + '\n');
+  console.error(`Wrote ${songs.length} songs to data/songs/${playlist.id}.json (* = year overridden)\n`);
 }
 
-await writeFile(new URL('data/songs.json', root), JSON.stringify(songs, null, 1) + '\n');
-console.error(`Wrote ${songs.length} songs to data/songs.json (* = year overridden)`);
+const playlists = JSON.parse(await readFile(dataFile('playlists.json'), 'utf8'));
+const overrides = JSON.parse(await readFile(dataFile('year-overrides.json'), 'utf8'));
+const wanted = process.argv.slice(2);
+const unknown = wanted.filter((id) => !playlists.some((p) => p.id === id));
+if (unknown.length) {
+  console.error(`Unknown playlist id(s): ${unknown.join(', ')}. Known: ${playlists.map((p) => p.id).join(', ')}`);
+  process.exit(1);
+}
+for (const playlist of playlists) {
+  if (!wanted.length || wanted.includes(playlist.id)) await buildPlaylist(playlist, overrides);
+}

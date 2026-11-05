@@ -264,3 +264,19 @@ body.host .banner h2 { font-size: 2.6rem; }
 }
 
 .winner { font-size: 3rem; text-align: center; margin: 24px 0 8px; }
+
+/* Playlist picker */
+.playlists { display: grid; gap: 8px; }
+.playlist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.playlist.on { border-color: var(--cyan); }
+.playlist input { width: 20px; height: 20px; accent-color: var(--cyan); margin: 0; }
+.playlist .pl-name { flex: 1; font-weight: 700; }

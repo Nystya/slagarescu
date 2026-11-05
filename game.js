@@ -23,11 +23,21 @@ function shuffle(arr) {
 }
 
 export class Game {
-  constructor(songs, saved = null) {
-    this.songs = songs;
-    this.state = saved || {
+  // playlists: [{ id, name, songs: [{ id, title, artist, year, preview }] }]
+  constructor(playlists, saved = null) {
+    this.playlists = playlists;
+    // Songs by Spotify id; a song in several playlists is one song.
+    this.songs = new Map();
+    for (const pl of playlists) {
+      for (const song of pl.songs) {
+        if (!this.songs.has(song.id)) this.songs.set(song.id, { ...song, playlists: new Set() });
+        this.songs.get(song.id).playlists.add(pl.id);
+      }
+    }
+    this.state = this.isUsable(saved) ? saved : {
       phase: 'lobby',
       target: 10,
+      playlists: playlists.map((pl) => pl.id),
       players: [],
       deck: [],
       turn: 0,
@@ -40,6 +50,15 @@ export class Game {
       round: 0, // bumps every time a new song is drawn, so hosts know to (re)load audio
       replay: 0,
     };
+  }
+
+  // A saved game is only resumable if every song it mentions still exists.
+  isUsable(saved) {
+    if (!saved || !Array.isArray(saved.playlists)) return false;
+    const ids = [saved.song, ...saved.deck, ...saved.players.flatMap((p) => p.cards)].filter((x) => x != null);
+    if (!ids.every((id) => this.songs.has(id))) return false;
+    saved.playlists = saved.playlists.filter((id) => this.playlists.some((pl) => pl.id === id));
+    return true;
   }
 
   // ---------- helpers ----------
@@ -56,8 +75,14 @@ export class Game {
     return this.active()?.id === id;
   }
 
-  year(songIdx) {
-    return this.songs[songIdx].year;
+  year(songId) {
+    return this.songs.get(songId).year;
+  }
+
+  // Ids of every song in the enabled playlists.
+  pool() {
+    const enabled = new Set(this.state.playlists);
+    return [...this.songs.values()].filter((song) => [...song.playlists].some((pl) => enabled.has(pl))).map((song) => song.id);
   }
 
   drawSong() {
@@ -65,15 +90,15 @@ export class Game {
     if (!s.deck.length) {
       const used = new Set(s.players.flatMap((p) => p.cards));
       if (s.song != null) used.add(s.song);
-      s.deck = shuffle(this.songs.map((_, i) => i).filter((i) => !used.has(i)));
+      s.deck = shuffle(this.pool().filter((id) => !used.has(id)));
     }
     return s.deck.pop() ?? null;
   }
 
-  insertCard(player, songIdx) {
-    const y = this.year(songIdx);
+  insertCard(player, songId) {
+    const y = this.year(songId);
     const at = player.cards.findIndex((c) => this.year(c) > y);
-    player.cards.splice(at === -1 ? player.cards.length : at, 0, songIdx);
+    player.cards.splice(at === -1 ? player.cards.length : at, 0, songId);
   }
 
   // Slot i sits before cards[i]; slot cards.length is the far right.
@@ -192,12 +217,23 @@ export class Game {
       this.state.target = target;
     },
 
+    setPlaylists({ host }, { playlists }) {
+      const s = this.state;
+      if (!host) throw new GameError('Only the host can change settings');
+      if (s.phase !== 'lobby' && s.phase !== 'won') throw new GameError('Game already started');
+      if (!Array.isArray(playlists)) throw new GameError('Invalid playlists');
+      s.playlists = this.playlists.map((pl) => pl.id).filter((id) => playlists.includes(id));
+    },
+
     start({ host }) {
       const s = this.state;
       if (!host) throw new GameError('Only the host can start');
       if (s.phase !== 'lobby' && s.phase !== 'won') throw new GameError('Game already running');
       if (!s.players.length) throw new GameError('Nobody has joined yet');
-      s.deck = shuffle(this.songs.map((_, i) => i));
+      const pool = this.pool();
+      if (!s.playlists.length) throw new GameError('Pick at least one playlist');
+      if (pool.length <= s.players.length) throw new GameError('Not enough songs in the chosen playlists');
+      s.deck = shuffle(pool);
       s.song = null;
       s.winners = [];
       for (const p of s.players) {
@@ -319,8 +355,8 @@ export class Game {
 
   // ---------- views ----------
 
-  songInfo(idx) {
-    const { id, title, artist, year } = this.songs[idx];
+  songInfo(songId) {
+    const { id, title, artist, year } = this.songs.get(songId);
     return { id, title, artist, year };
   }
 
@@ -331,7 +367,13 @@ export class Game {
       phase: s.phase,
       target: s.target,
       rules: RULES,
-      songCount: this.songs.length,
+      songCount: this.pool().length,
+      playlists: this.playlists.map((pl) => ({
+        id: pl.id,
+        name: pl.name,
+        count: pl.songs.length,
+        enabled: s.playlists.includes(pl.id),
+      })),
       you: id && this.player(id) ? id : null,
       turn: s.players[s.turn]?.id ?? null,
       players: s.players.map((p) => ({
@@ -349,7 +391,7 @@ export class Game {
       song: s.phase === 'reveal' && s.song != null ? this.songInfo(s.song) : null,
     };
     if (host && s.song != null && s.phase !== 'lobby' && s.phase !== 'won') {
-      v.audio = { round: s.round, replay: s.replay, preview: this.songs[s.song].preview };
+      v.audio = { round: s.round, replay: s.replay, preview: this.songs.get(s.song).preview };
     }
     return v;
   }
