@@ -37,6 +37,7 @@ export class Game {
     this.state = this.isUsable(saved) ? saved : {
       phase: 'lobby',
       target: 10,
+      soundEverywhere: false, // play the song on every phone too, not just the host
       playlists: playlists.map((pl) => pl.id),
       players: [],
       deck: [],
@@ -217,6 +218,12 @@ export class Game {
       this.state.target = target;
     },
 
+    // Allowed mid-game too, e.g. when the host's speaker is too quiet.
+    setSoundEverywhere({ host }, { on }) {
+      if (!host) throw new GameError('Only the host can change settings');
+      this.state.soundEverywhere = on === true;
+    },
+
     setPlaylists({ host }, { playlists }) {
       const s = this.state;
       if (!host) throw new GameError('Only the host can change settings');
@@ -360,12 +367,14 @@ export class Game {
     return { id, title, artist, year };
   }
 
-  // What a client may see. The current song stays secret until the reveal.
+  // What a client may see. The current song stays secret until the reveal; with
+  // soundEverywhere, phones also get its preview URL (an opaque mp3 link).
   view({ host = false, id = null } = {}) {
     const s = this.state;
     const v = {
       phase: s.phase,
       target: s.target,
+      soundEverywhere: !!s.soundEverywhere,
       rules: RULES,
       songCount: this.pool().length,
       playlists: this.playlists.map((pl) => ({
@@ -390,7 +399,7 @@ export class Game {
       round: s.round,
       song: s.phase === 'reveal' && s.song != null ? this.songInfo(s.song) : null,
     };
-    if (host && s.song != null && s.phase !== 'lobby' && s.phase !== 'won') {
+    if ((host || (s.soundEverywhere && v.you)) && s.song != null && s.phase !== 'lobby' && s.phase !== 'won') {
       v.audio = { round: s.round, replay: s.replay, preview: this.songs.get(s.song).preview };
     }
     return v;

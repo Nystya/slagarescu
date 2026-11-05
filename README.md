@@ -1,7 +1,7 @@
 # Hitster Night
 
 A multiplayer web version of the Hitster music card game. A laptop runs the
-game and plays the music; everyone plays from their own phone on the same Wi-Fi.
+game and plays the music (optionally on every phone too); everyone plays from their own phone on the same Wi-Fi.
 
 No dependencies (just Node 24+), no Spotify login — songs play as 30-second
 Spotify previews.
@@ -16,6 +16,10 @@ npm start        # or: node server.js
 2. Friends scan the QR code or open the printed `http://<lan-ip>:3000` on their phones
    and type their name.
 3. Tick the playlists to play with, pick the number of cards to win and hit **Start game**.
+
+To hear the song on every phone too (handy without a speaker), tick **Play on
+every phone** in the lobby or the in-game menu; each phone can mute itself.
+Phones then receive the song's preview link, an opaque mp3 URL with no title.
 
 The host screen plays the song and shows the active player's timeline live.
 Phones show your own timeline; on your turn you tap a spot and lock it in, on

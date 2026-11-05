@@ -1,13 +1,16 @@
 // Hitster Night client. The same page is the host screen (/host, plays the music)
-// and the player view on each phone. All game logic lives on the server; this
+// and the player view on each phone (which plays it too if the host turns on
+// "Play on every phone"). All game logic lives on the server; this
 // file renders the state it receives and posts the player's moves.
 
 const IS_HOST = location.pathname === '/host' || new URLSearchParams(location.search).has('host');
 const ID_KEY = 'hitster-night-player';
+const MUTE_KEY = 'hitster-night-muted';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('audio');
 document.body.classList.toggle('host', IS_HOST);
+audio.muted = !IS_HOST && storageGet(MUTE_KEY) === '1';
 
 let myId = IS_HOST ? null : storageGet(ID_KEY);
 let view = null;
@@ -88,11 +91,11 @@ function onView() {
     ui.stealPick = null;
     ui.pickRound = view.round;
   }
-  if (IS_HOST) syncAudio();
+  syncAudio();
   render();
 }
 
-// ---------- host audio ----------
+// ---------- audio ----------
 
 let audioRound = null;
 let audioReplay = 0;
@@ -279,6 +282,14 @@ function joinPlayersHTML() {
   return `<p class="muted center">Already here: ${view.players.map((p) => esc(p.name)).join(', ')}</p>`;
 }
 
+// Phones only get audio when the host plays the song on every phone.
+function phoneSoundHTML() {
+  if (!view.audio) return '';
+  return `<div class="center" style="margin-top:16px">
+    <button class="small ghost" data-action="toggle-mute">${audio.muted ? '🔇 Unmute this phone' : '🔊 Mute this phone'}</button>
+  </div>`;
+}
+
 function playerHTML() {
   if (!view.you) return joinHTML();
   const me = playerById(view.you);
@@ -289,12 +300,17 @@ function playerHTML() {
       <span class="muted">${esc(me.name)}</span>
     </div>${scoresHTML()}`;
 
+  return playerPhaseHTML(me, active, myTurn, top) + (view.phase === 'listen' || view.phase === 'steal' ? phoneSoundHTML() : '');
+}
+
+function playerPhaseHTML(me, active, myTurn, top) {
   switch (view.phase) {
     case 'lobby':
       return `${top}
         <div class="banner"><h2>You're in, ${esc(me.name)}!</h2>
         <p class="muted">Waiting for the host to start the game…</p></div>
         <div class="panel"><h3>First to ${view.target} cards wins</h3>
+        ${view.soundEverywhere ? '<p>🔊 The music plays on your phone too.</p>' : ''}
         <p>Playlists: ${view.playlists.filter((pl) => pl.enabled).map((pl) => esc(pl.name)).join(', ') || '—'} (${view.songCount} songs)</p>
         <p class="muted">You start with ${view.rules.startTokens} ${coin} tokens. Name the title &amp; artist to earn more.
         Spend ${view.rules.skipCost} to skip a song, ${view.rules.stealCost} to steal, ${view.rules.buyCost} to buy a free card.</p></div>`;
@@ -373,6 +389,14 @@ function joinUrl() {
   return local && view.joinUrls.length ? view.joinUrls[0] : location.origin;
 }
 
+function soundSettingHTML() {
+  return `<label class="playlist ${view.soundEverywhere ? 'on' : ''}">
+      <input type="checkbox" data-setting="soundEverywhere" ${view.soundEverywhere ? 'checked' : ''}>
+      <span class="pl-name">Play on every phone</span>
+      <span class="muted">not just here</span>
+    </label>`;
+}
+
 function hostMenuHTML() {
   return `<div class="row spread" style="margin-bottom:12px">
       <h2 class="logo" style="margin:0">Hitster Night</h2>
@@ -382,6 +406,7 @@ function hostMenuHTML() {
       ui.menu
         ? `<div class="panel stack">
             <p class="muted">Join at <b>${esc(joinUrl())}</b></p>
+            ${soundSettingHTML()}
             <div class="chips">${view.players
               .map((p) => `<span class="chip">${esc(p.name)}<button data-action="kick" data-player="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button></span>`)
               .join('')}</div>
@@ -436,6 +461,10 @@ function hostLobbyHTML() {
         )
         .join('')}</div>
       ${view.songCount ? '' : '<p class="muted" style="margin-top:12px">Pick at least one playlist.</p>'}
+    </div>
+    <div class="panel">
+      <h3>Sound</h3>
+      ${soundSettingHTML()}
     </div>
     <div class="panel">
       <h3>Cards to win</h3>
@@ -516,7 +545,7 @@ function render() {
     return;
   }
   app.innerHTML = IS_HOST ? hostHTML() : playerHTML();
-  if (IS_HOST && ui.soundBlocked && view.audio) {
+  if (ui.soundBlocked && view.audio && !audio.muted) {
     app.insertAdjacentHTML(
       'beforeend',
       `<div class="sound-gate"><button class="primary" data-action="enable-sound">🔊 Tap to play the music</button></div>`,
@@ -609,6 +638,12 @@ const actions = {
   'enable-sound'() {
     playAudio();
   },
+  'toggle-mute'() {
+    audio.muted = !audio.muted;
+    storageSet(MUTE_KEY, audio.muted ? '1' : null);
+    if (!audio.muted && audio.paused && view.audio) playAudio();
+    else render();
+  },
 };
 
 document.addEventListener('click', (e) => {
@@ -622,6 +657,7 @@ app.addEventListener('input', (e) => {
 });
 
 app.addEventListener('change', (e) => {
+  if (e.target.dataset.setting === 'soundEverywhere') return act('setSoundEverywhere', { on: e.target.checked });
   if (!e.target.dataset.playlist) return;
   const playlists = [...app.querySelectorAll('[data-playlist]:checked')].map((el) => el.dataset.playlist);
   act('setPlaylists', { playlists });

@@ -72,14 +72,20 @@ function send(client) {
   client.res.write(`data: ${JSON.stringify(viewFor(client))}\n\n`);
 }
 
+async function save() {
+  const tmp = `${SAVE_FILE}.tmp`;
+  await writeFile(tmp, JSON.stringify(game.state));
+  await rename(tmp, SAVE_FILE);
+}
+
 let saveTimer = null;
+let saving = Promise.resolve();
 function broadcast() {
   for (const c of clients) send(c);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    const tmp = `${SAVE_FILE}.tmp`;
-    await writeFile(tmp, JSON.stringify(game.state));
-    await rename(tmp, SAVE_FILE);
+  saveTimer = setTimeout(() => {
+    // One save at a time: overlapping saves would share the temp file.
+    saving = saving.then(save).catch((err) => console.error('Could not save the game:', err.message));
   }, 200);
 }
 
